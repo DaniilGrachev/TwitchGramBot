@@ -1,8 +1,8 @@
 import sqlite3
 import telebot
 import requests
+import time
 from telebot import types
-from typing import Tuple
 
 TOKEN = "6750520093:AAGtz40xJG2ivepaAtjU5x46FQoEKP-bR84"
 bot = telebot.TeleBot(TOKEN)
@@ -25,6 +25,9 @@ def message_start(message):
     bot.send_message(message.chat.id, f"""🟣Hello {message.from_user.first_name}, this is Telegram bot for tracking your favorite streamers on Twitch💜
 Type '🏁 Login' to get started!""", reply_markup=markup)
 
+    us_id = message.from_user.id
+    check_streams_for_user(message, us_id)
+
 
 @bot.message_handler(commands=['help'])
 def message_help(message):
@@ -34,6 +37,16 @@ def message_help(message):
 2) ⌨️ Typing streamer's nickname or URL
 3) 📃 Get information about him: Online/Offline, Followers, URL
 4) ✔️ Follow him in this bot or just leave it""")
+
+
+@bot.message_handler(commands=['login'])
+def message_login(message):
+    us_id = message.from_user.id
+    if not user_exists(user_id=us_id):
+        create_user(message, user_id=us_id)
+        bot.send_message(message.chat.id, f"New user with id:{message.from_user.id} have been created!")
+    else:
+        bot.send_message(message.chat.id, "User already exists.")
 
 
 @bot.message_handler(commands=['menu'])
@@ -48,20 +61,36 @@ def message_menu(message):
     bot.send_message(message.chat.id, "☰ Menu", reply_markup=markup)
 
 
-@bot.message_handler(commands=['login'])
-def message_login(message):
-    us_id = message.from_user.id
-    if not user_exists(user_id=us_id):
-        create_user(message, user_id=us_id)
-        bot.send_message(message.chat.id, f"New user with id:{message.from_user.id} have been created!")
-    else:
-        bot.send_message(message.chat.id, "User already exists.")
-
-
 @bot.message_handler(commands=['find'])
 def message_find(message):
     bot.send_message(message.chat.id, "Write a streamer's nickname on Twitch")
     bot.register_next_step_handler(message, find_streamer)
+
+
+@bot.message_handler(commands=['account'])
+def message_account(message):
+    user_id = message.from_user.id
+    bot.send_message(message.chat.id, f"Your account:\nID: {message.from_user.id}\nYour followings: {count_followings(user_id)}")
+
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    login_key = types.KeyboardButton("🔢 Followings")
+    find_key = types.KeyboardButton("➖ Unfollow streamer")
+    menu_key = types.KeyboardButton("☰ Menu")
+
+    markup.add(login_key, find_key, menu_key)
+    bot.send_message(message.chat.id, "🔑 My account", reply_markup=markup)
+
+
+@bot.message_handler(commands=['followings'])
+def message_followings(message):
+    user_id = message.from_user.id
+    bot.send_message(message.chat.id, f"You have subscriptions on {count_followings(user_id)}:\n{print_followings(user_id)}")
+
+
+@bot.message_handler(commands=['unfollow'])
+def message_unfollow(message):
+    bot.send_message(message.chat.id, "Write a streamer's nickname to unfollow")
+    bot.register_next_step_handler(message, unfollow)
 
 
 @bot.message_handler(content_types=['text'])
@@ -75,6 +104,12 @@ def get_messages(message):
             message_login(message)
         elif message.text == '🔍 Find streamer':
             message_find(message)
+        elif message.text == '🔑 My account':
+            message_account(message)
+        elif message.text == '🔢 Followings':
+            message_followings(message)
+        elif message.text == '➖ Unfollow streamer':
+            message_unfollow(message)
         else:
             bot.send_message(message.chat.id, "Sorry, I don't this command")
 # -------------------------------------------------------------------------------DECORATORS-------------------------------------------------------------------------------
@@ -91,6 +126,87 @@ def create_user(message, user_id: str):
     cursor.execute(
         'INSERT INTO users (user_id) VALUES (?)', (user_id,))
     conn.commit()
+
+
+def count_followings(user_id):
+    cursor.execute('SELECT COUNT(streamer_id) FROM streamers_to_users WHERE user_id = ?', (user_id,))
+    result = cursor.fetchone()
+    if result:
+        return result[0]
+    else:
+        return 0
+
+
+def print_followings(user_id):
+    cursor.execute('SELECT streamer_name FROM streamers_to_users '
+                   'JOIN streamers ON streamers_to_users.streamer_id = streamers.streamer_id '
+                   'WHERE user_id = ?', (user_id,))
+    subscriptions = cursor.fetchall()
+    if subscriptions:
+        subscribed_streamers = [sub[0] for sub in subscriptions]
+        return "\n".join(subscribed_streamers)
+    else:
+        return None  # Если пользователь не подписан ни на одного стримера, возвращаем None
+
+
+def unfollow(message):
+    user_id = message.from_user.id
+    streamer_name = message.text.lower()
+    cursor.execute('SELECT streamer_id FROM streamers WHERE streamer_name = ?', (streamer_name,))
+    streamer_id = cursor.fetchone()
+    if streamer_id:
+        cursor.execute('DELETE FROM streamers_to_users WHERE user_id = ? AND streamer_id = ?', (user_id, streamer_id[0]))
+        conn.commit()
+        bot.send_message(message.chat.id, f"You have been successfully unfollowed from {streamer_name}.")
+    else:
+        bot.send_message(message.chat.id, f"There is no streamer with name: {streamer_name}.")
+
+
+def get_subscribed_streamers(user_id):
+    cursor.execute('SELECT streamer_name FROM streamers_to_users '
+                   'JOIN streamers ON streamers_to_users.streamer_id = streamers.streamer_id '
+                   'WHERE streamers_to_users.user_id = ?', (user_id,))
+    subscribed_streamers = cursor.fetchall()
+    return [row[0] for row in subscribed_streamers]
+
+
+def is_already_notified(streamer_name):
+    cursor.execute('SELECT online FROM streamers WHERE streamer_name = ?', (streamer_name.lower(),))
+    result = cursor.fetchone()
+    if result:
+        return result[0] == 1
+    else:
+        return False
+
+
+def set_streamer_online_status(streamer_name, online):
+    cursor.execute('UPDATE streamers SET online = ? WHERE streamer_name = ?', (int(online), streamer_name.lower()))
+    conn.commit()
+
+
+def check_streams_for_user(message, user_id):
+    while True:
+        # Получаем список подписок пользователя
+        subscribed_streamers = get_subscribed_streamers(user_id)
+
+        # Проверяем каждого подписанного стримера
+        for streamer_name in subscribed_streamers:
+            access_token = get_twitch_access_token()  # Получаем токен для каждой проверки
+            is_live = check_streamer_online(access_token, streamer_name)
+            if is_live:
+                # Проверяем, было ли уже отправлено уведомление о начале стрима
+                if not is_already_notified(streamer_name):
+                    user_data = get_user_data(access_token, streamer_name)
+                    user_url = f'https://www.twitch.tv/{streamer_name}'
+                    bot.send_photo(message.chat.id, user_data['profile_image_url'], caption=f"🔴{streamer_name} is LIVE NOW\nTwitch profile: {user_url}")
+                    # Обновляем статус стримера в базе данных
+                    set_streamer_online_status(streamer_name, True)
+            else:
+                # Обновляем статус стримера в базе данных
+                set_streamer_online_status(streamer_name, False)
+
+        # Задержка перед следующей проверкой
+        time.sleep(10)  # в секундах
 # --------------------------USER--------------------------
 
 
@@ -171,7 +287,6 @@ def follow_streamer(message, nickname: str):
                     user_data = get_user_data(access_token, nickname)
                     if user_data:
                         subscribe_to_streamer(user_id, nickname)
-                        bot.send_message(message.chat.id, f"You are now following {nickname}. You will receive notifications when they start streaming.")
                     else:
                         bot.send_message(message.chat.id, f"Unable to get information about {nickname}.")
                 else:
@@ -180,26 +295,46 @@ def follow_streamer(message, nickname: str):
                 bot.send_message(message.chat.id, "Error getting Twitch access token.")
         else:
             bot.send_message(message.chat.id, "Please log in using the '🏁 Login' option.")
+    elif message.text == "🔍 Find streamer":
+        message_find(message)
+    elif message.text == "🔑 My account":
+        message_account(message)
+    elif message.text == "☰ Menu":
+        message_menu(message)
 
 
 def subscribe_to_streamer(user_id: int, streamer_name: str):
-    # Добавляем данные в таблицу streamers
-    cursor.execute('INSERT INTO streamers (streamer_name, streamer_url) VALUES (?, ?)',
-                   (streamer_name.lower(), f'https://www.twitch.tv/{streamer_name.lower()}'))
-    streamer_id = cursor.lastrowid  # Получаем автоматически сгенерированный streamer_id
+    # Получаем streamer_id по имени стримера
+    cursor.execute('SELECT streamer_id FROM streamers WHERE streamer_name = ?',
+                   (streamer_name.lower(),))
+    existing_streamer = cursor.fetchone()
 
-    # Получаем текущее значение streamers_id для пользователя
-    cursor.execute('SELECT streamers_id FROM users WHERE user_id = ?', (user_id,))
-    current_streamers_id = cursor.fetchone()
+    if existing_streamer:
+        # Если стример существует, проверяем, подписан ли пользователь уже
+        cursor.execute('SELECT * FROM streamers_to_users WHERE user_id = ? AND streamer_id = ?',
+                       (user_id, existing_streamer[0]))
+        existing_subscription = cursor.fetchone()
 
-    # Обновляем streamers_id для пользователя в таблице users
-    if current_streamers_id and current_streamers_id[0]:  # Если current_streamers_id не пусто
-        new_streamers_id = f"{current_streamers_id[0]}, {streamer_id}"
+        if existing_subscription:
+            bot.send_message(user_id, f"You are already subscribed to {streamer_name}.")
+            return
     else:
-        new_streamers_id = str(streamer_id)
+        # Если стримера с таким именем нет, добавляем его в таблицу streamers
+        cursor.execute('INSERT INTO streamers (streamer_name, streamer_url) VALUES (?, ?)',
+                       (streamer_name.lower(), f'https://www.twitch.tv/{streamer_name.lower()}'))
+        streamer_id = cursor.lastrowid  # Получаем автоматически сгенерированный streamer_id
+    if not existing_streamer:
+        streamer_id = cursor.lastrowid
+    else:
+        streamer_id = existing_streamer[0]
 
-    cursor.execute('UPDATE users SET streamers_id = ? WHERE user_id = ?', (new_streamers_id, user_id))
+    # Добавляем запись в таблицу streamers_to_users
+    cursor.execute('INSERT INTO streamers_to_users (user_id, streamer_id) VALUES (?, ?)',
+                   (user_id, streamer_id))
     conn.commit()
+    # Отправляем сообщение о успешной подписке
+    bot.send_message(user_id,
+                     f"Now you are following {streamer_name}. You will receive notifications when he start streaming.")
 
 
 def check_streamer_online(access_token, username):
