@@ -129,7 +129,7 @@ def create_user(message, user_id: str):
 
 
 def count_followings(user_id):
-    cursor.execute('SELECT COUNT(streamer_id) FROM streamers_to_users WHERE user_id = ?', (user_id,))
+    cursor.execute('SELECT COUNT(streamer_id) FROM subscription WHERE user_id = ?', (user_id,))
     result = cursor.fetchone()
     if result:
         return result[0]
@@ -138,8 +138,8 @@ def count_followings(user_id):
 
 
 def print_followings(user_id):
-    cursor.execute('SELECT streamer_name FROM streamers_to_users '
-                   'JOIN streamers ON streamers_to_users.streamer_id = streamers.streamer_id '
+    cursor.execute('SELECT streamer_name FROM subscription '
+                   'JOIN streamers ON subscription.streamer_id = streamers.streamer_id '
                    'WHERE user_id = ?', (user_id,))
     subscriptions = cursor.fetchall()
     if subscriptions:
@@ -155,7 +155,7 @@ def unfollow(message):
     cursor.execute('SELECT streamer_id FROM streamers WHERE streamer_name = ?', (streamer_name,))
     streamer_id = cursor.fetchone()
     if streamer_id:
-        cursor.execute('DELETE FROM streamers_to_users WHERE user_id = ? AND streamer_id = ?', (user_id, streamer_id[0]))
+        cursor.execute('DELETE FROM subscription WHERE user_id = ? AND streamer_id = ?', (user_id, streamer_id[0]))
         conn.commit()
         bot.send_message(message.chat.id, f"You have been successfully unfollowed from {streamer_name}.")
     else:
@@ -163,9 +163,9 @@ def unfollow(message):
 
 
 def get_subscribed_streamers(user_id):
-    cursor.execute('SELECT streamer_name FROM streamers_to_users '
-                   'JOIN streamers ON streamers_to_users.streamer_id = streamers.streamer_id '
-                   'WHERE streamers_to_users.user_id = ?', (user_id,))
+    cursor.execute('SELECT streamer_name FROM subscription '
+                   'JOIN streamers ON subscription.streamer_id = streamers.streamer_id '
+                   'WHERE subscription.user_id = ?', (user_id,))
     subscribed_streamers = cursor.fetchall()
     return [row[0] for row in subscribed_streamers]
 
@@ -311,7 +311,7 @@ def subscribe_to_streamer(user_id: int, streamer_name: str):
 
     if existing_streamer:
         # Если стример существует, проверяем, подписан ли пользователь уже
-        cursor.execute('SELECT * FROM streamers_to_users WHERE user_id = ? AND streamer_id = ?',
+        cursor.execute('SELECT * FROM subscription WHERE user_id = ? AND streamer_id = ?',
                        (user_id, existing_streamer[0]))
         existing_subscription = cursor.fetchone()
 
@@ -328,8 +328,8 @@ def subscribe_to_streamer(user_id: int, streamer_name: str):
     else:
         streamer_id = existing_streamer[0]
 
-    # Добавляем запись в таблицу streamers_to_users
-    cursor.execute('INSERT INTO streamers_to_users (user_id, streamer_id) VALUES (?, ?)',
+    # Добавляем запись в таблицу subscription
+    cursor.execute('INSERT INTO subscription (user_id, streamer_id) VALUES (?, ?)',
                    (user_id, streamer_id))
     conn.commit()
     # Отправляем сообщение о успешной подписке
