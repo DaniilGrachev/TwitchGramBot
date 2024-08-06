@@ -4,11 +4,11 @@ import requests
 import time
 from telebot import types
 
-TOKEN = "6750520093:AAGtz40xJG2ivepaAtjU5x46FQoEKP-bR84"
+TOKEN = ""
 bot = telebot.TeleBot(TOKEN)
 
-CLIENT_ID = 'sn586pl402dj3vk22280dng9ijaa6g'
-CLIENT_SECRET = '0mgddkx9xu4oq9iay9r3ptbln2rm9w'
+CLIENT_ID = ''
+CLIENT_SECRET = ''
 
 conn = sqlite3.connect('../db/database', check_same_thread=False)
 cursor = conn.cursor()
